@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TimeTracker — Single File (Firebase + Firestore)</title>
+  <meta name="description" content="Time tracking app: log activities in minutes, analyze 24-hour usage. Firebase Auth + Firestore. Single-file runnable." />
+  <!-- Simple clean CSS (no Tailwind build required) -->
+  <style>
+    :root{--bg:#0f172a;--card:#0b1220;--accent:#60a5fa;--muted:#94a3b8;--glass: rgba(255,255,255,0.04)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; background:linear-gradient(180deg,#071029 0%, #061525 100%);color:#e6eef8;min-height:100vh}
+    .container{max-width:1100px;margin:28px auto;padding:20px}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+    .brand{display:flex;gap:12px;align-items:center}
+    .logo{width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#34d399);display:flex;align-items:center;justify-content:center;font-weight:700;color:#012;}
+    h1{margin:0;font-size:20px}
+    .subtitle{color:var(--muted);font-size:13px}
+
+    /* layout */
+    .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,0.5);}
+    .grid{display:grid;gap:16px}
+    .cols-3{grid-template-columns:1fr 360px;}
+    @media(max-width:880px){.cols-3{grid-template-columns:1fr} }
+
+    /* form */
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=text], input[type=date], input[type=number], select, .btn{width:100%;padding:10px;border-radius:8px;border:none;background:var(--glass);color:inherit}
+    .small{font-size:13px;color:var(--muted)}
+
+    .actions{display:flex;gap:8px;margin-top:10px}
+    .btn{cursor:pointer}
+    .btn-primary{background:linear-gradient(90deg,var(--accent),#34d399);color:#012;font-weight:600}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    .muted{color:var(--muted)}
+
+    /* activities */
+    .activity{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);}
+    .activity+.activity{margin-top:8px}
+    .tag{font-size:12px;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.03)}
+
+    /* dashboard */
+    .charts{display:flex;gap:18px;align-items:flex-start}
+    @media(max-width:880px){.charts{flex-direction:column}}
+
+    /* utilities */
+    .row{display:flex;gap:8px;align-items:center}
+    .right{margin-left:auto}
+    .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px;text-align:center;color:var(--muted)}
+
+    footer{margin-top:22px;color:var(--muted);font-size:13px;text-align:center}
+
+    .chip{background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:999px}
+
+    a.link{color:var(--accent);text-decoration:none}
+
+    /* small animation */
+    .fade{transition:opacity .2s ease, transform .18s ease}
+    .fade-enter{opacity:0;transform:translateY(8px)}
+
+  </style>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Firebase (compat) CDN for single-file ease -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="logo">TT</div>
+        <div>
+          <h1>TimeTracker</h1>
+          <div class="subtitle">Log daily activities in minutes • Analyze how you spend 24 hours</div>
+        </div>
+      </div>
+      <div id="auth-area" class="row">
+        <!-- Filled by JS: sign in / user info -->
+      </div>
+    </header>
+
+    <!-- Main layout -->
+    <div id="main" class="grid cols-3">
+      <!-- Left: Tracker -->
+      <div class="card" id="tracker-card">
+        <div class="row">
+          <div>
+            <label for="date">Select date</label>
+            <input id="date" type="date" />
+          </div>
+          <div class="right">
+            <div class="small muted">Remaining minutes</div>
+            <div id="remaining" class="chip">1440</div>
+          </div>
+        </div>
+
+        <hr style="margin:12px 0;border-color:rgba(255,255,255,0.03)" />
+
+        <div id="add-form">
+          <label for="title">Activity title</label>
+          <input id="title" type="text" placeholder="e.g., Deep Work, Sleep" />
+
+          <label for="category">Category</label>
+          <select id="category">
+            <option>Work</option>
+            <option>Study</option>
+            <option>Sleep</option>
+            <option>Entertainment</option>
+            <option>Exercise</option>
+            <option>Other</option>
+          </select>
+
+          <label for="minutes">Duration (minutes)</label>
+          <input id="minutes" type="number" min="1" placeholder="e.g., 90" />
+
+          <div class="actions">
+            <button id="add-btn" class="btn btn-primary">Add Activity</button>
+            <button id="clear-btn" class="btn btn-ghost">Clear</button>
+          </div>
+        </div>
+
+        <div style="margin-top:14px">
+          <h3 style="margin:0 0 8px 0">Activities</h3>
+          <div id="activities-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <div style="margin-top:14px" class="row">
+          <button id="analyse-btn" class="btn btn-primary" disabled>Analyse</button>
+          <button id="save-btn" class="btn btn-ghost">Save</button>
+        </div>
+      </div>
+
+      <!-- Right: Dashboard / No data -->
+      <div>
+        <div id="dashboard-card" class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <h3 style="margin:0">Analytics</h3>
+              <div class="small muted">Date-based summary & charts</div>
+            </div>
+            <div class="small muted">Total minutes: <span id="total-min">0</span></div>
+          </div>
+
+          <div id="dashboard-content" style="margin-top:14px">
+            <!-- either charts or no-data -->
+            <div id="no-data" class="empty">
+              <div style="font-size:44px">📭</div>
+              <h4 style="margin:10px 0">No data available</h4>
+              <div class="muted">Start logging your day now to see beautiful analytics.</div>
+            </div>
+
+            <div id="charts" style="display:none">
+              <div class="charts">
+                <canvas id="pieChart" width="360" height="260"></canvas>
+                <canvas id="barChart" width="360" height="260"></canvas>
+              </div>
+
+              <div style="margin-top:12px">
+                <h4 style="margin:0 0 8px 0">Activities</h4>
+                <div id="activities-detail"></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div style="height:16px"></div>
+
+        <div class="card" style="margin-top:16px">
+          <h4 style="margin:0 0 8px 0">Tips</h4>
+          <ul class="muted" style="padding-left:18px;margin:0">
+            <li>Make sure total minutes ≤ 1440 for a date.</li>
+            <li>Click <strong>Save</strong> to persist to Firebase.</li>
+            <li>When there are activities, <strong>Analyse</strong> becomes available.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Built with ❤️ • Uses Firebase Auth & Firestore • Chart.js for visuals
+    </footer>
+  </div>
+
+  <!-- Firebase configuration & app script -->
+  <script>
+    /*
+      IMPORTANT: Replace the firebaseConfig object below with your Firebase project's config.
+      To get this:
+        1. Go to https://console.firebase.google.com/ -> Project Settings
+        2. Under "Your apps" add a Web app (if not added) and copy the config object.
+
+      This single-file app uses Firebase compat libraries for ease of use in a static file.
+      Firestore structure used: users/{uid}/days/{date} (document) with fields:
+        {
+          activities: [ { id, title, category, minutes } ],
+          totalMinutes: number,
+          updatedAt: timestamp
+        }
+    */
+
+    // ======== CONFIGURE FIREBASE HERE ========
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    // =========================================
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // DOM elements
+    const authArea = document.getElementById('auth-area');
+    const dateInput = document.getElementById('date');
+    const titleInput = document.getElementById('title');
+    const categoryInput = document.getElementById('category');
+    const minutesInput = document.getElementById('minutes');
+    const addBtn = document.getElementById('add-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const activitiesList = document.getElementById('activities-list');
+    const remainingEl = document.getElementById('remaining');
+    const analyseBtn = document.getElementById('analyse-btn');
+    const saveBtn = document.getElementById('save-btn');
+    const noDataEl = document.getElementById('no-data');
+    const chartsEl = document.getElementById('charts');
+    const totalMinEl = document.getElementById('total-min');
+    const activitiesDetail = document.getElementById('activities-detail');
+
+    let user = null;
+    let activities = []; // local state for current date
+    let pieChart = null, barChart = null;
+
+    // default date = today
+    const todayStr = new Date().toISOString().slice(0,10);
+    dateInput.value = todayStr;
+
+    // ===== Auth UI =====
+    function renderAuthArea(){
+      authArea.innerHTML = '';
+      if (!user){
+        // show login form (email/password) and google sign-in
+        const email = document.createElement('input'); email.placeholder='Email'; email.style.padding='8px'; email.style.borderRadius='8px'; email.style.background='transparent'; email.style.border='1px solid rgba(255,255,255,0.04)'; email.style.color='inherit'; email.style.marginRight='8px';
+        const pass = document.createElement('input'); pass.placeholder='Password'; pass.type='password'; pass.style.padding='8px'; pass.style.borderRadius='8px'; pass.style.background='transparent'; pass.style.border='1px solid rgba(255,255,255,0.04)'; pass.style.color='inherit'; pass.style.marginRight='8px';
+        const signin = document.createElement('button'); signin.textContent='Sign In'; signin.className='btn btn-primary'; signin.style.padding='8px 10px'; signin.onclick = async ()=>{
+          const e = email.value.trim(); const p = pass.value.trim();
+          if (!e||!p) return alert('Provide email and password');
+          try{ await auth.signInWithEmailAndPassword(e,p); }
+          catch(err){ alert(err.message) }
+        }
+        const signup = document.createElement('button'); signup.textContent='Sign Up'; signup.className='btn btn-ghost'; signup.style.padding='8px 10px'; signup.onclick = async ()=>{
+          const e = email.value.trim(); const p = pass.value.trim();
+          if (!e||!p) return alert('Provide email and password');
+          try{ await auth.createUserWithEmailAndPassword(e,p); }
+          catch(err){ alert(err.message) }
+        }
+        const google = document.createElement('button'); google.textContent='Google'; google.className='btn btn-ghost'; google.style.padding='8px 10px'; google.onclick = async ()=>{
+          const prov = new firebase.auth.GoogleAuthProvider();
+          try{ await auth.signInWithPopup(prov); }
+          catch(err){ alert(err.message) }
+        }
+        authArea.appendChild(email); authArea.appendChild(pass); authArea.appendChild(signin); authArea.appendChild(signup); authArea.appendChild(google);
+      } else {
+        const name = document.createElement('div'); name.textContent = user.email; name.className='small muted';
+        const btn = document.createElement('button'); btn.textContent='Sign out'; btn.className='btn btn-ghost'; btn.onclick = ()=>auth.signOut();
+        authArea.appendChild(name); authArea.appendChild(btn);
+      }
+    }
+
+    // ===== Utilities =====
+    function uid(){ return user ? user.uid : null }
+    function formattedDate(d){ return d }
+
+    function computeTotals(){
+      const total = activities.reduce((s,a)=>s + Number(a.minutes || 0), 0);
+      totalMinEl.textContent = total;
+      remainingEl.textContent = Math.max(0, 1440 - total);
+      // enable Analyse if there's at least 1 minute and total <= 1440
+      analyseBtn.disabled = total === 0 || total > 1440;
+    }
+
+    function renderActivities(){
+      activitiesList.innerHTML = '';
+      if (activities.length === 0){ activitiesList.innerHTML = '<div class="muted">No activities added for this date.</div>'; return }
+      activities.forEach(act=>{
+        const wrap = document.createElement('div'); wrap.className='activity fade';
+        const left = document.createElement('div');
+        left.innerHTML = `<div style="font-weight:600">${escapeHtml(act.title)}</div><div class="small muted">${escapeHtml(act.category)} • ${act.minutes} min</div>`;
+        const right = document.createElement('div');
+        const editBtn = document.createElement('button'); editBtn.textContent='Edit'; editBtn.className='btn btn-ghost'; editBtn.onclick = ()=>editActivity(act.id);
+        const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.className='btn btn-ghost'; delBtn.onclick = ()=>deleteActivity(act.id);
+        right.appendChild(editBtn); right.appendChild(delBtn);
+        wrap.appendChild(left); wrap.appendChild(right);
+        activitiesList.appendChild(wrap);
+      })
+    }
+
+    function escapeHtml(s){ if (!s) return ''; return s.replaceAll('<','&lt;').replaceAll('>','&gt;') }
+
+    // ===== Activity CRUD =====
+    function addActivityLocal(){
+      const title = titleInput.value.trim();
+      const category = categoryInput.value;
+      const minutes = Number(minutesInput.value);
+      if (!title) return alert('Enter activity title');
+      if (!minutes || minutes <= 0) return alert('Enter minutes > 0');
+      const totalNow = activities.reduce((s,a)=>s + Number(a.minutes || 0), 0);
+      if (totalNow + minutes > 1440) return alert('Total minutes for the day cannot exceed 1440');
+      const id = Date.now().toString();
+      activities.push({ id, title, category, minutes });
+      titleInput.value = ''; minutesInput.value = '';
+      renderActivities(); computeTotals();
+    }
+
+    function editActivity(id){
+      const a = activities.find(x=>x.id===id); if (!a) return;
+      const newTitle = prompt('Edit title', a.title); if (newTitle===null) return; const newMinutes = prompt('Edit minutes', a.minutes); if (newMinutes===null) return;
+      const mins = Number(newMinutes);
+      if (!newTitle.trim() || !mins || mins <= 0) return alert('Invalid values');
+      // check total constraint
+      const otherTotal = activities.filter(x=>x.id!==id).reduce((s,x)=>s + Number(x.minutes || 0),0);
+      if (otherTotal + mins > 1440) return alert('Total minutes exceed 1440');
+      a.title = newTitle.trim(); a.minutes = mins; renderActivities(); computeTotals();
+    }
+
+    function deleteActivity(id){ if (!confirm('Delete this activity?')) return; activities = activities.filter(a=>a.id!==id); renderActivities(); computeTotals(); }
+
+    // ===== Firestore persistence =====
+    async function loadFromFirestore(date){
+      if (!user) return;
+      const docRef = db.collection('users').doc(user.uid).collection('days').doc(date);
+      const docSnap = await docRef.get();
+      if (docSnap.exists){
+        const data = docSnap.data();
+        activities = (data.activities || []).map(a=>({ ...a }));
+        renderActivities(); computeTotals();
+        renderDashboard();
+      } else {
+        activities = [];
+        renderActivities(); computeTotals();
+        renderDashboard();
+      }
+    }
+
+    async function saveToFirestore(date){
+      if (!user) return alert('You must be signed in to save');
+      const docRef = db.collection('users').doc(user.uid).collection('days').doc(date);
+      const total = activities.reduce((s,a)=>s + Number(a.minutes || 0), 0);
+      await docRef.set({ activities, totalMinutes: total, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      alert('Saved');
+      renderDashboard();
+    }
+
+    // ===== Dashboard rendering =====
+    function aggregateByCategory(){
+      const map = {};
+      activities.forEach(a=>{ map[a.category] = (map[a.category]||0) + Number(a.minutes||0) });
+      return Object.keys(map).map(k=>({ category:k, minutes: map[k] }));
+    }
+
+    function renderDashboard(){
+      const total = activities.reduce((s,a)=>s + Number(a.minutes || 0), 0);
+      if (activities.length === 0){ noDataEl.style.display = 'flex'; chartsEl.style.display = 'none'; totalMinEl.textContent = 0; activitiesDetail.innerHTML = ''; if (pieChart){ pieChart.destroy(); pieChart=null } if (barChart){ barChart.destroy(); barChart=null } return }
+
+      // show charts
+      noDataEl.style.display = 'none'; chartsEl.style.display = 'block'; totalMinEl.textContent = total;
+
+      // Pie chart by category
+      const byCat = aggregateByCategory();
+      const pieCtx = document.getElementById('pieChart').getContext('2d');
+      const labels = byCat.map(x=>x.category);
+      const data = byCat.map(x=>x.minutes);
+      if (pieChart) pieChart.destroy();
+      pieChart = new Chart(pieCtx, { type:'pie', data:{ labels, datasets:[{ data, backgroundColor: generateColors(labels.length) }] }, options:{ responsive:true, plugins:{ tooltip:{mode:'index'} } } });
+
+      // Bar chart per activity
+      const barCtx = document.getElementById('barChart').getContext('2d');
+      const actLabels = activities.map(a=>a.title);
+      const actData = activities.map(a=>a.minutes);
+      if (barChart) barChart.destroy();
+      barChart = new Chart(barCtx, { type:'bar', data:{ labels: actLabels, datasets:[{ label:'Minutes', data: actData, backgroundColor: generateColors(actData.length) }] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true } } } });
+
+      // Details
+      activitiesDetail.innerHTML = activities.map(a=>`<div class=\"activity\"><div><div style=\"font-weight:600\">${escapeHtml(a.title)}</div><div class=\"small muted\">${escapeHtml(a.category)}</div></div><div>${a.minutes} min</div></div>`).join('');
+    }
+
+    function generateColors(n){ const palette = ['#60a5fa','#34d399','#f97316','#f43f5e','#a78bfa','#f59e0b','#06b6d4','#ef4444']; const res=[]; for(let i=0;i<n;i++) res.push(palette[i%palette.length]); return res }
+
+    // ===== Event wiring =====
+    addBtn.addEventListener('click', addActivityLocal);
+    clearBtn.addEventListener('click', ()=>{ titleInput.value=''; minutesInput.value=''; });
+    analyseBtn.addEventListener('click', ()=>{ renderDashboard(); window.scrollTo({top:0,behavior:'smooth'}); });
+    saveBtn.addEventListener('click', ()=> saveToFirestore(dateInput.value) );
+    dateInput.addEventListener('change', ()=> loadFromFirestore(dateInput.value));
+
+    // ===== Auth state listener =====
+    auth.onAuthStateChanged(async (u)=>{
+      user = u; renderAuthArea();
+      if (user){ await loadFromFirestore(dateInput.value); }
+      else { activities = []; renderActivities(); computeTotals(); renderDashboard(); }
+    });
+
+    // ===== Initial render =====
+    renderAuthArea(); computeTotals(); renderActivities(); renderDashboard();
+
+    // ===== Helper: Quick VS Code instructions in console =====
+    // ===== Helper: Quick VS Code instructions in console =====
+console.log(`TimeTracker single-file running. To connect to Firebase, edit the firebaseConfig object in this file.`);
+console.log(`To run locally in VS Code: Install Live Server extension -> Right-click index.html -> Open with Live Server.`);
+console.log(`Firestore structure: users/{uid}/days/{date} (document) with activities array`);
+
+
+  </script>
+</body>
+</html>
